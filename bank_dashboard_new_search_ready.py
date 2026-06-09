@@ -22,10 +22,43 @@ import streamlit as st
 st.set_page_config(page_title="Bank Submit Dashboard", page_icon="🏦",
                    layout="wide", initial_sidebar_state="expanded")
 
+st.markdown('''
+<style>
+.block-container{padding-top:1rem;max-width:100%;}
+[data-testid="stSidebar"]{
+ background:linear-gradient(180deg,#08111c,#122133)!important;
+}
+[data-testid="metric-container"]{
+ background:linear-gradient(135deg,#0c1520,#15273a);
+ border:1px solid #1a8fff;
+ padding:12px;
+ border-radius:16px;
+ box-shadow:0 8px 24px rgba(0,0,0,.25);
+}
+h1,h2,h3{color:#00c9a7!important;}
+div[data-testid="stDataFrame"]{
+ border:1px solid #1a8fff;border-radius:12px;
+}
+[data-testid="metric-container"]:hover {
+  transform: scale(1.02);
+  box-shadow:0 12px 32px rgba(0,200,167,.35);
+  transition: all 0.3s ease-in-out;
+}
+body {
+    background-color:#e0e5e9; 
+}/* এখানে আপনার পছন্দের রঙ দিন */
+.block-container {
+    background-color: #1e293b; 
+}/* পুরো কন্টেইনারের ব্যাকগ্রাউন্ড */
+
+</style>
+''', unsafe_allow_html=True)
+
+
 st.markdown("""
 <style>
 html,body,[data-testid="stAppViewContainer"]{background:#070d14;color:#e2eaf3;}
-[data-testid="stSidebar"]{background:#0c1520!important;border-right:1px solid #1a2a3a;}
+[data-testid="stSidebar"]{background:linear-gradient(180deg,#08111c,#122133)!important;border-right:1px solid #1a2a3a;}
 section[data-testid="stSidebar"] *{color:#c8d8e8!important;}
 [data-testid="metric-container"]{background:#0c1520;border:1px solid #1a2a3a;
   border-top:2px solid #00c9a7;border-radius:10px;padding:14px 18px!important;}
@@ -113,12 +146,18 @@ sm  = st.sidebar.multiselect("Month",        ml,                                
 sf  = st.sidebar.multiselect("Firm",         sorted(raw["Firm Name"].dropna().unique()), default=sorted(raw["Firm Name"].dropna().unique()))
 sb  = st.sidebar.multiselect("Our Bank",     sorted(raw["Our Bank"].dropna().unique()),  default=sorted(raw["Our Bank"].dropna().unique()))
 ss  = st.sidebar.multiselect("Sales Person", sorted(raw["Sales Person"].dropna().unique()), default=sorted(raw["Sales Person"].dropna().unique()))
+sparty = st.sidebar.multiselect("Party Name", sorted(raw["Party Name"].dropna().unique()), default=sorted(raw["Party Name"].dropna().unique()))
+date_range = st.sidebar.date_input("Date Range", value=(raw["_date"].min().date(), raw["_date"].max().date()))
 
 df = raw.copy()
 if sm: df = df[df["MonthSort"].astype(str).isin(sm)]
 if sf: df = df[df["Firm Name"].isin(sf)]
 if sb: df = df[df["Our Bank"].isin(sb)]
 if ss: df = df[df["Sales Person"].isin(ss) | df["Sales Person"].isna()]
+if sparty: df = df[df["Party Name"].isin(sparty)]
+if isinstance(date_range, tuple) and len(date_range)==2:
+    start_date, end_date = date_range
+    df = df[(df["_date"].dt.date >= start_date) & (df["_date"].dt.date <= end_date)]
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Showing **{len(df):,}** of **{len(raw):,}** records")
@@ -538,6 +577,8 @@ with t6:
         fig2 = px.pie(st_df, names="Status", values="Value", hole=0.5,
                       color_discrete_sequence=["#00c9a7","#1a8fff","#ff6b35"])
         fig2.update_layout(**PL, showlegend=False)
+        fig2.update_traces(textinfo="label+percent", textfont_size=11)
+        st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("---")
     sh("Sales Person — Paid vs Not Yet Paid")
@@ -562,6 +603,11 @@ with t6:
         mask = pft.astype(str).apply(lambda c: c.str.contains(search_text, case=False, na=False)).any(axis=1)
         pft = pft[mask]
     st.dataframe(pft, use_container_width=True, hide_index=True, height=500)
+
+    st.download_button("📥 Download CSV",
+        pft.to_csv(index=False).encode("utf-8"),
+        "bank_submit_filtered.csv","text/csv")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FOOTER
