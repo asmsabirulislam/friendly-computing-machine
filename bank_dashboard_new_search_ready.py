@@ -15,13 +15,21 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from io import BytesIO
+
+try:
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Bank Submit Dashboard", page_icon="🏦",
                    layout="wide", initial_sidebar_state="expanded")
-
 
 
 PL = dict(
@@ -551,9 +559,44 @@ with t6:
         pft = pft[mask]
     st.dataframe(pft, use_container_width=True, hide_index=True, height=500)
 
-    st.download_button("📥 Download CSV",
+    col_csv, col_pdf = st.columns([1, 1])
+    col_csv.download_button("📥 Download CSV",
         pft.to_csv(index=False).encode("utf-8"),
-        "bank_submit_filtered.csv","text/csv")
+        "bank_submit_filtered.csv", "text/csv")
+
+    if REPORTLAB_AVAILABLE:
+        def df_to_pdf_bytes(df, title="Bank Submit Records"):
+            buf = BytesIO()
+            # Use landscape letter to give more width for tables
+            doc = SimpleDocTemplate(buf, pagesize=landscape(letter), leftMargin=18, rightMargin=18, topMargin=18, bottomMargin=18)
+            # Prepare table data: header + rows (all converted to strings)
+            data = [list(df.columns)] + df.fillna("").astype(str).values.tolist()
+            table = Table(data, repeatRows=1)
+            # Basic styling
+            style = TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a8fff")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ])
+            table.setStyle(style)
+            elems = [table]
+            doc.build(elems)
+            buf.seek(0)
+            return buf.read()
+
+        try:
+            pdf_bytes = df_to_pdf_bytes(pft)
+            col_pdf.download_button("📄 Download PDF",
+                pdf_bytes,
+                "bank_submit_filtered.pdf",
+                "application/pdf")
+        except Exception as e:
+            col_pdf.error(f"Could not generate PDF: {e}")
+    else:
+        col_pdf.warning("Install reportlab to enable PDF export: pip install reportlab")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -562,5 +605,5 @@ with t6:
 st.markdown("---")
 st.markdown(
     f"<p style='text-align:center;color:#1a2a3a;font-size:11px;letter-spacing:.1em'>"
-    f"Asm@2026 BANK SUBMIT HISTORY DASHBOARD &nbsp;·&nbsp; {N:,} RECORDS &nbsp;·&nbsp; {period}"
+    f" Asm@2026 BANK SUBMIT HISTORY DASHBOARD &nbsp;·&nbsp; {N:,} RECORDS &nbsp;·&nbsp; {period}"
     f"</p>", unsafe_allow_html=True)
