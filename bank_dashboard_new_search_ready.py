@@ -562,5 +562,5 @@ with t6:
 st.markdown("---")
 st.markdown(
     f"<p style='text-align:center;color:#1a2a3a;font-size:11px;letter-spacing:.1em'>"
-    f"BANK SUBMIT HISTORY DASHBOARD &nbsp;·&nbsp; {N:,} RECORDS &nbsp;·&nbsp; {period}"
+    f"Asm@2026 BANK SUBMIT HISTORY DASHBOARD &nbsp;·&nbsp; {N:,} RECORDS &nbsp;·&nbsp; {period}"
     f"</p>", unsafe_allow_html=True)
