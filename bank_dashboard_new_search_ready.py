@@ -1001,6 +1001,7 @@ with t_payment:
             w = max(len(str(col)), int(max_len)) * cw + 24
             widths[col] = min(max_w, max(min_w, w))
         if "Bank Refno"    in widths: widths["Bank Refno"]    = max(widths["Bank Refno"],    285)
+        if "LC No"    in widths: widths["LC No"]    = max(widths["LC No"],    285)
         if "Invoice Value" in widths: widths["Invoice Value"] = max(widths["Invoice Value"], 160)
         return widths
 
