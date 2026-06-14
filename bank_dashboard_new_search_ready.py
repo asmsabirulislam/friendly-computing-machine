@@ -796,7 +796,233 @@ with t_weekly:
 
 
 
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    # ── Total sum row (requested) ─────────────────────────────────
+    # Use numeric columns (before formatting) to avoid string-parsing issues.
+    subs_total = int(summary["Submissions"].sum())
+
+    # Paid / Accepted / Not Accepted values are already formatted currency strings in `summary`,
+    # but we can still safely parse them here because they are limited to $... format.
+    def _money_to_float(s):
+        try:
+            if isinstance(s, str):
+                return float(s.replace("$", "").replace(",", ""))
+            return float(s)
+        except Exception:
+            return 0.0
+
+    inv_total       = _money_to_float(summary["Invoice Value (USD)"].sum())
+    paid_total      = int(summary["Paid"].sum())
+    paid_val_total  = _money_to_float(summary["Paid Value"].sum())
+    acc_val_total   = _money_to_float(summary["Accepted Value"].sum())
+    nacc_val_total  = _money_to_float(summary["Not Accepted Value"].sum())
+
+    pay_rate_total = f"{(paid_total / subs_total * 100 if subs_total else 0):.1f}%"
+
+    totals_row = {
+        "Week": "TOTAL",  # date/label column requested
+        "Submissions": subs_total,
+        "Invoice Value (USD)": f"${inv_total:,.2f}",
+        "Paid": paid_total,
+        "Payment Rate": pay_rate_total,
+        "Paid Value": f"${paid_val_total:,.2f}",
+        "Accepted Value": f"${acc_val_total:,.2f}",
+        "Not Accepted Value": f"${nacc_val_total:,.2f}",
+    }
+
+    summary_total = pd.concat([summary, pd.DataFrame([totals_row])], ignore_index=True)
+
+    st.dataframe(summary_total, use_container_width=True, hide_index=True)
+
+
+    # ── Download Weekly Summary as PDF ────────────────────────────────
+    if REPORTLAB_AVAILABLE:
+        def weekly_summary_to_pdf_bytes(df_in, title="Bank Submissions Weekly Summary Table 2026",
+                                          subtitle="", generated_at=""):
+            buf = BytesIO()
+            from reportlab.lib.pagesizes import landscape as _landscape
+            from reportlab.lib.units import inch as _inch
+
+            pw, ph = _landscape(A3)
+            lm = rm = 24
+            tm = bm = 24
+            uw = pw - lm - rm
+
+            hf = "Helvetica-Bold"
+            cf = "Helvetica"
+            hfs = 12
+            cfs = 9
+            min_cw = 1.0 * _inch
+            max_cw = 3.5 * _inch
+
+            def mw(txt, font, sz):
+                return pdfmetrics.stringWidth(str(txt), font, sz)
+
+            # widths by content (rough)
+            dt = df_in.fillna("").astype(str)
+            col_widths_pdf = []
+            for col in df_in.columns:
+                vals = dt[col].tolist()
+                if len(vals) > 200:
+                    vals = vals[::max(1, len(vals)//200)]
+                measured = [mw(v, cf, cfs) for v in vals if v]
+                mx = max([mw(col, hf, hfs)] + measured) if measured else mw(col, hf, hfs)
+                w = max(min_cw, min(max_cw, mx + 18))
+                col_widths_pdf.append(w)
+
+            tot = sum(col_widths_pdf)
+            if tot > uw and tot > 0:
+                col_widths_pdf = [w * uw / tot for w in col_widths_pdf]
+
+            # split columns into groups if needed
+            def chunk(cols, widths, max_w):
+                groups, cur, cw3 = [], [], 0.0
+                for c, w in zip(cols, widths):
+                    if cur and cw3 + w > max_w:
+                        groups.append(cur)
+                        cur = [c]
+                        cw3 = w
+                    else:
+                        cur.append(c)
+                        cw3 += w
+                if cur:
+                    groups.append(cur)
+                return groups
+
+            ss2 = getSampleStyleSheet()
+            hs = ParagraphStyle("HS", parent=ss2["Normal"], fontName=hf, fontSize=hfs,
+                                 leading=13, textColor=colors.HexColor("#ffffff"), alignment=TA_LEFT, wordWrap="CJK")
+            cs = ParagraphStyle("CS", parent=ss2["Normal"], fontName=cf, fontSize=cfs,
+                                 leading=10, alignment=TA_LEFT, wordWrap="CJK")
+
+            ts = TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d3f47")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
+            ])
+
+            col_list = list(df_in.columns)
+            groups = chunk(col_list, col_widths_pdf, uw)
+
+            pages = []
+            for g_i, g_cols in enumerate(groups):
+                # widths for this group
+                g_w = [col_widths_pdf[col_list.index(c)] for c in g_cols]
+
+                header_row = [Paragraph(str(c), hs) for c in g_cols]
+                rows = [header_row]
+
+                for rv in df_in.fillna("").astype(str).values.tolist():
+                    row_cells = []
+                    for c in g_cols:
+                        idx = col_list.index(c)
+                        row_cells.append(Paragraph(str(rv[idx]), cs))
+                    rows.append(row_cells)
+
+                # Center-align the table on the page. Also ensure table width is
+                # aligned with available page width (uw).
+                tbl2 = LongTable(
+                    rows,
+                    repeatRows=1,
+                    colWidths=g_w,
+                    hAlign="CENTER",
+                    splitByRow=1,
+                    spaceBefore=12,
+                    spaceAfter=12,
+                )
+
+                tbl2.setStyle(ts)
+                pages.append(tbl2)
+                if g_i < len(groups) - 1:
+                    pages.append(PageBreak())
+
+            def page_header(canvas, doc):
+                canvas.saveState()
+                canvas.setFont(hf, 18)
+                canvas.drawCentredString(pw/2, ph - tm - 8, str(title))
+
+                canvas.setFont(cf, 11)
+                y2 = ph - tm - 26
+                if subtitle:
+                    canvas.drawCentredString(pw/2, y2, str(subtitle))
+                else:
+                    canvas.drawString(lm, y2, "")
+
+                if generated_at:
+                    canvas.setFont(cf, 8)
+                    canvas.drawString(lm, bm/2 + 2, f"Generated on: {generated_at}")
+
+                canvas.setFont(cf, 8)
+                canvas.drawRightString(pw - rm, ph - tm - 8, f"Page {doc.page}")
+                canvas.restoreState()
+
+            doc = SimpleDocTemplate(
+                buf,
+                pagesize=_landscape(A3),
+                leftMargin=lm,
+                rightMargin=rm,
+                topMargin=tm + 28,
+                bottomMargin=bm
+            )
+
+            doc.build(
+                pages,
+                onFirstPage=page_header,
+                onLaterPages=page_header
+            )
+
+            buf.seek(0)
+            return buf.read()
+
+        # fixed columns (as user asked)
+        # IMPORTANT: include TOTAL/sub-total row (rendered in the dataframe above)
+        export_weekly = summary_total.copy()[[
+            "Week",
+            "Submissions",
+            "Invoice Value (USD)",
+            "Paid",
+            "Payment Rate",
+            "Paid Value",
+            "Accepted Value",
+            "Not Accepted Value",
+        ]]
+
+        pdf_bytes_weekly = weekly_summary_to_pdf_bytes(
+            export_weekly,
+            subtitle=f"Generated from current filters ({len(summary)} weeks + TOTAL row)"
+                     if len(summary) else "Generated from current filters (TOTAL row only)",
+            generated_at=datetime.now().strftime("%d %b %Y %H:%M:%S"),
+        )
+
+        st.download_button(
+            "📄 Download Weekly Summary PDF",
+            pdf_bytes_weekly,
+            file_name="bank_submissions_weekly_summary.pdf",
+            mime="application/pdf",
+        )
+    else:
+        st.info("PDF download এর জন্য reportlab ইনস্টল করা নেই। requirements.txt-এ `reportlab` যোগ করুন বা `pip install reportlab` করুন।")
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
